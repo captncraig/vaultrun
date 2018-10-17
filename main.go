@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/hashicorp/vault/api"
 )
@@ -59,6 +62,8 @@ func main() {
 		} else if strings.HasPrefix(v, relPrefix) {
 			// relative
 			parseSecret(relPrefix, relativeSecrets)
+		} else if strings.HasPrefix(k, "VAULT_") {
+			// do not copy vault variables into child process
 		} else {
 			newEnviron = append(newEnviron, e)
 		}
@@ -103,4 +108,21 @@ func main() {
 	for _, v := range newEnviron {
 		fmt.Println(v)
 	}
+
+	var launch = syscall.Exec
+
+	cmd := os.Args[1]
+	args := os.Args[1:]
+
+	if runtime.GOOS == "windows" {
+		launch = nonExecLaunch
+		args = args[1:]
+	}
+
+	launch(cmd, args, newEnviron)
+}
+
+func nonExecLaunch(path string, args []string, environ []string) error {
+	cmd := exec.Command(path, args...)
+	return nil
 }
