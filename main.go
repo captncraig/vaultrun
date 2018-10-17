@@ -76,8 +76,6 @@ func main() {
 		}
 	}
 
-	fmt.Println(absoluteSecrets)
-
 	// create vault client
 	conf := api.DefaultConfig()
 	if err := conf.ReadEnvironment(); err != nil {
@@ -105,10 +103,6 @@ func main() {
 		}
 	}
 
-	for _, v := range newEnviron {
-		fmt.Println(v)
-	}
-
 	var launch = syscall.Exec
 
 	cmd := os.Args[1]
@@ -123,6 +117,10 @@ func main() {
 }
 
 func nonExecLaunch(path string, args []string, environ []string) error {
+	log.Println("Launching via os/exec. This app not designed to run on windows.")
 	cmd := exec.Command(path, args...)
-	return nil
+	cmd.Env = environ
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	return cmd.Run()
 }
