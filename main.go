@@ -85,11 +85,22 @@ func main() {
 	}
 
 	// TODO: check various auth methods.
-	for path := range absoluteSecrets {
+	for path, replacements := range absoluteSecrets {
 		secret, err := client.Logical().Read(path)
 		if err != nil {
 			log.Fatalf("Error reading secret %s: %s", path, err)
 		}
-		fmt.Println(secret.Data)
+		for _, r := range replacements {
+			raw, ok := secret.Data[r.Key]
+			if !ok {
+				log.Fatalf("Secret %s has no key %s", path, r.Key)
+			}
+			val := fmt.Sprintf("%s=%s", r.EnvName, raw)
+			newEnviron = append(newEnviron, val)
+		}
+	}
+
+	for _, v := range newEnviron {
+		fmt.Println(v)
 	}
 }
