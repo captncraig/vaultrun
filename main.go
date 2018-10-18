@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -95,13 +94,9 @@ func main() {
 		if role == "" || mount == "" {
 			log.Fatalf("VAULTRUN_KUBE_ROLE and VAULTRUN_KUBE_PATH must both be set")
 		}
-		b64token, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
+		jwt, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
 		if err != nil {
 			log.Fatalf("Couldn't load service account token from file: %s", err)
-		}
-		jwt, err := base64.StdEncoding.DecodeString(string(b64token))
-		if err != nil {
-			log.Fatalf("Invalid service account file %s. %s", string(b64token), err)
 		}
 		resp, err := client.Logical().Write(mount, map[string]interface{}{
 			"role": role,
