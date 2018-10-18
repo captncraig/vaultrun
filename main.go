@@ -98,8 +98,8 @@ func main() {
 		if err != nil {
 			log.Fatalf("Couldn't load service account token from file: %s", err)
 		}
-		resp, err := client.Logical().Write(mount, map[string]interface{}{
-			"role": role + "/login",
+		resp, err := client.Logical().Write(mount+"/login", map[string]interface{}{
+			"role": role,
 			"jwt":  string(jwt),
 		})
 		if err != nil {
