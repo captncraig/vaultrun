@@ -29,6 +29,12 @@ const (
 )
 
 func main() {
+
+	log.Println(os.Args)
+	if len(os.Args) < 2 {
+		log.Fatal("USAGE: vaultrun cmd [args...]")
+	}
+
 	newEnviron := []string{}
 
 	prefix := "secret"
@@ -103,24 +109,49 @@ func main() {
 		}
 	}
 
-	var launch = syscall.Exec
-
-	cmd := os.Args[1]
-	args := os.Args[1:]
+	var launch = execLaunch
 
 	if runtime.GOOS == "windows" {
 		launch = nonExecLaunch
-		args = args[1:]
 	}
 
-	launch(cmd, args, newEnviron)
+	if err = launch(newEnviron); err != nil {
+		log.Fatalf("Error launching application: %s", err)
+	}
 }
 
-func nonExecLaunch(path string, args []string, environ []string) error {
-	log.Println("Launching via os/exec. This app not designed to run on windows.")
+func execLaunch(environ []string) error {
+	cmdName := os.Args[1]
+	fullPath, err := exec.LookPath(cmdName)
+	if err != nil {
+		return err
+	}
+	args := append([]string{fullPath}, os.Args[2:]...)
+	syscall.Exec(fullPath, args, environ)
+	return nil
+}
+
+func nonExecLaunch(environ []string) error {
+	// windows fallback launcher. We really like unixy systems where we can `exec` to replace this process with the child one.
+	// As a fallback, we launch the child process, pipe its IO to our own, and try to emulate its exit code.
+	path := os.Args[1]
+	args := os.Args[2:]
+	log.Println(path, args)
 	cmd := exec.Command(path, args...)
 	cmd.Env = environ
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	return cmd.Run()
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if err := cmd.Wait(); err != nil {
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+				code := status.ExitStatus()
+				os.Exit(code)
+			}
+		}
+	}
+	return nil
 }
