@@ -101,7 +101,7 @@ func main() {
 		}
 		jwt, err := base64.StdEncoding.DecodeString(string(b64token))
 		if err != nil {
-			log.Fatal("Invalid service account file")
+			log.Fatalf("Invalid service account file %s. %s", string(b64token), err)
 		}
 		resp, err := client.Logical().Write(mount, map[string]interface{}{
 			"role": role,
