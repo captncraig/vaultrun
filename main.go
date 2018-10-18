@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -24,8 +26,6 @@ const (
 	relPrefix = "$v:"
 	absPrefix = "$v!:"
 	keySep    = "#"
-
-	envDefaultPath = "VAULTRUN_DEFAULT_PATH"
 )
 
 func main() {
@@ -37,16 +37,25 @@ func main() {
 
 	newEnviron := []string{}
 
-	prefix := "secret"
+	prefix := os.Getenv("VAULTRUN_DEFAULT_PATH")
+	if prefix == "" {
+		prefix = "secret"
+	}
 	absoluteSecrets := secretMap{}
-	relativeSecrets := secretMap{}
 
 	// collect what secrets to grab, copying anything else right over
 	for _, e := range os.Environ() {
 		parts := strings.SplitN(e, "=", 2)
 		k, v := parts[0], parts[1]
-		parseSecret := func(prefix string, dest secretMap) {
-			v = strings.TrimPrefix(v, prefix)
+
+		isRel := strings.HasPrefix(v, relPrefix)
+		isAbs := strings.HasPrefix(v, absPrefix)
+		if isAbs || isRel {
+			if isAbs {
+				v = strings.TrimPrefix(v, absPrefix)
+			} else {
+				v = strings.TrimPrefix(v, relPrefix)
+			}
 			vParts := strings.Split(v, keySep)
 			if len(vParts) != 2 {
 				log.Printf(msgFormat, e)
@@ -58,42 +67,52 @@ func main() {
 				Key:     vParts[1],
 			}
 			secretName := vParts[0]
-			dest[secretName] = append(dest[secretName], sts)
-		}
-		if k == envDefaultPath {
-			prefix = v
-		} else if strings.HasPrefix(v, absPrefix) {
-			// absolute
-			parseSecret(absPrefix, absoluteSecrets)
-		} else if strings.HasPrefix(v, relPrefix) {
-			// relative
-			parseSecret(relPrefix, relativeSecrets)
-		} else if strings.HasPrefix(k, "VAULT_") {
-			// do not copy vault variables into child process
+			if isRel {
+				secretName = prefix + "/" + secretName
+			}
+			absoluteSecrets[secretName] = append(absoluteSecrets[secretName], sts)
+		} else if strings.HasPrefix(k, "VAULT_") || strings.HasPrefix(k, "VAULTRUN_") {
+			// do not copy vault or vaultrun variables into child process
+			// if needed, maybe make a special meta var for it
 		} else {
 			newEnviron = append(newEnviron, e)
-		}
-	}
-
-	for k, vs := range relativeSecrets {
-		for _, sts := range vs {
-			absKey := prefix + "/" + k
-			absoluteSecrets[absKey] = append(absoluteSecrets[absKey], sts)
 		}
 	}
 
 	// create vault client
 	conf := api.DefaultConfig()
 	if err := conf.ReadEnvironment(); err != nil {
-		log.Fatalf("Error creating vault client from environment: %s", err)
+		log.Fatalf("Error creating vault config from environment: %s", err)
 	}
-
 	client, err := api.NewClient(conf)
 	if err != nil {
 		log.Fatalf("Error creating vault client: %s", err)
 	}
 
-	// TODO: check various auth methods.
+	role := os.Getenv("VAULTRUN_KUBE_ROLE")
+	mount := os.Getenv("VAULTRUN_KUBE_PATH")
+	if role != "" || mount != "" {
+		if role == "" || mount == "" {
+			log.Fatalf("VAULTRUN_KUBE_ROLE and VAULTRUN_KUBE_PATH must both be set")
+		}
+		b64token, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
+		if err != nil {
+			log.Fatalf("Couldn't load service account token from file: %s", err)
+		}
+		jwt, err := base64.StdEncoding.DecodeString(string(b64token))
+		if err != nil {
+			log.Fatal("Invalid service account file")
+		}
+		resp, err := client.Logical().Write(mount, map[string]interface{}{
+			"role": role,
+			"jwt":  string(jwt),
+		})
+		if err != nil {
+			log.Fatalf("Error exchanging kube token for vault token: %s", err)
+		}
+		client.SetToken(resp.Auth.ClientToken)
+	}
+
 	for path, replacements := range absoluteSecrets {
 		secret, err := client.Logical().Read(path)
 		if err != nil {
